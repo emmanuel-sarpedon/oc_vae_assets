@@ -1,0 +1,72 @@
+commit 1de1baa8444aaf5fbb3029d8506a44394c7df521
+Author: Emmanuel SARPEDON <emmanuel.sarpedon@appines.fr>
+Date:   Fri Sep 12 13:03:28 2025 +0400
+
+    perf(api): defer cache invalidation and revalidatePath using after
+
+diff --git a/src/app/api/revalidate/public-view/route.ts b/src/app/api/revalidate/public-view/route.ts
+index 33d7869c..0e49e7a5 100644
+--- a/src/app/api/revalidate/public-view/route.ts
++++ b/src/app/api/revalidate/public-view/route.ts
+@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
+ import { z, ZodError } from "zod";
+ import { EnhancedNextResponse } from "@/utils/http/EnhancedNextResponse";
+ import config from "@/src/config";
++import { after } from "next/server";
++
+ import {
+   getPublicViewFormationData,
+   getPublicViewMissionData,
+@@ -22,30 +24,32 @@ export async function POST(request: NextRequest) {
+     // or an array of strings.
+     if (typeof publicUrl === "string") publicUrl = [publicUrl];
+ 
+-    for (const url of publicUrl) {
+-      const identifier = url.split("/").pop();
+-      if (!identifier) continue;
++    after(() => {
++      for (const url of publicUrl) {
++        const identifier = url.split("/").pop();
++        if (!identifier) continue;
+ 
+-      const params = url.split("/").filter(Boolean);
++        const params = url.split("/").filter(Boolean);
+ 
+-      switch (params.at(0)) {
+-        case "annonces":
+-          // fake mission follow this pattern: /annonces/recrutement/[identifier]
+-          const isFake = params.at(1) === "recrutement";
+-          getPublicViewMissionData({ identifier, isFake, invalidateCache: true });
+-          break;
++        switch (params.at(0)) {
++          case "annonces":
++            // fake mission follow this pattern: /annonces/recrutement/[identifier]
++            const isFake = params.at(1) === "recrutement";
++            getPublicViewMissionData({ identifier, isFake, invalidateCache: true });
++            break;
+ 
+-        case "etablissements":
+-          getPublicViewOfficeData({ identifier, invalidateCache: true });
+-          break;
++          case "etablissements":
++            getPublicViewOfficeData({ identifier, invalidateCache: true });
++            break;
+ 
+-        case "formations":
+-          getPublicViewFormationData({ identifier, invalidateCache: true });
+-          break;
+-      }
++          case "formations":
++            getPublicViewFormationData({ identifier, invalidateCache: true });
++            break;
++        }
+ 
+-      revalidatePath(url);
+-    }
++        revalidatePath(url);
++      }
++    });
+ 
+     return EnhancedNextResponse.accepted();
+   } catch (e) {
+
