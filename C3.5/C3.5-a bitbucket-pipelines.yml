@@ -1,0 +1,105 @@
+image: node:lts-jod
+
+definitions:
+  services:
+    docker:
+      memory: 5120
+
+  caches:
+    next-cache: .next/cache
+
+pipelines:
+  branches:
+    # Integration branch:
+    integration:
+      - step:
+          size: 2x
+          deployment: Integration
+          name: "Deploy to Cloud Run - integration"
+          image: google/cloud-sdk:latest
+          services:
+            - docker
+          caches:
+            - docker
+            - next-cache
+            - node
+          script:
+            - chmod +x scripts/deployment/add-env-to-env-docker.sh scripts/deployment/add-env-to-env-yaml.sh
+            - ./scripts/deployment/add-env-to-env-docker.sh # Add environment variables set in Bitbucket deployment to .env file
+            - ./scripts/deployment/add-env-to-env-yaml.sh # Add environment variables set in Bitbucket deployment to env.yaml file
+
+            # Build the Docker image
+            - docker build --platform amd64 -t europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest $(for i in `cat .env`; do out+="--build-arg $i " ; done; echo $out;out="") .
+
+            # Authenticate to Google Cloud
+            - echo ${GCP_KEY_FILE} | base64 --decode --ignore-garbage > /tmp/gcloud-api.json
+            - gcloud auth activate-service-account --key-file /tmp/gcloud-api.json
+            - gcloud config set project ${GCP_PROJECT_NAME}
+            - gcloud auth configure-docker europe-west1-docker.pkg.dev # register gcloud as a Docker credential helper
+
+            # Push the Docker image to Google Cloud
+            - docker push europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest
+
+            # Deploy the Docker image to Google Cloud Run
+            - >-
+              gcloud beta run deploy default --image europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest 
+              --execution-environment gen2
+              --cpu 1
+              --memory 1Gi
+              --min-instances 0
+              --max-instances 2
+              --concurrency 25
+              --timeout 60
+              --env-vars-file .env.yaml
+              --port 3000
+              --region europe-west1
+              --no-use-http2
+              --project landing-integration
+              --cpu-boost
+
+    # Master branch
+    master:
+      - step:
+          size: 2x
+          deployment: Production
+          name: "Deploy to Cloud Run - production"
+          image: google/cloud-sdk:latest
+          services:
+            - docker
+          caches:
+            - docker
+            - next-cache
+            - node
+          script:
+            - chmod +x scripts/deployment/add-env-to-env-docker.sh scripts/deployment/add-env-to-env-yaml.sh
+            - ./scripts/deployment/add-env-to-env-docker.sh # Add environment variables set in Bitbucket deployment to .env file
+            - ./scripts/deployment/add-env-to-env-yaml.sh # Add environment variables set in Bitbucket deployment to env.yaml file
+
+            # Build the Docker image
+            - docker build --platform amd64 -t europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest $(for i in `cat .env`; do out+="--build-arg $i " ; done; echo $out;out="") .
+
+            # Authenticate to Google Cloud
+            - echo ${GCP_KEY_FILE} | base64 --decode --ignore-garbage > /tmp/gcloud-api.json
+            - gcloud auth activate-service-account --key-file /tmp/gcloud-api.json
+            - gcloud config set project ${GCP_PROJECT_NAME}
+            - gcloud auth configure-docker europe-west1-docker.pkg.dev # register gcloud as a Docker credential helper
+
+            # Push the Docker image to Google Cloud
+            - docker push europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest
+
+            # Deploy the Docker image to Google Cloud Run
+            - >-
+              gcloud beta run deploy default --image europe-west1-docker.pkg.dev/${GCP_PROJECT_NAME}/nextjs/nextjs:latest
+              --execution-environment gen1
+              --cpu 1
+              --memory 1Gi
+              --min-instances 1
+              --max-instances 10
+              --concurrency 25
+              --timeout 60
+              --env-vars-file .env.yaml
+              --port 3000
+              --region europe-west1
+              --no-use-http2
+              --project landing-production-371709
+              --cpu-boost
